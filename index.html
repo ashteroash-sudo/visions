@@ -53,6 +53,19 @@
     );
     opacity:0;
   }
+  #set-selector{
+    position:fixed; top:10px; left:10px; z-index:60;
+    display:flex; gap:6px; flex-wrap:wrap; max-width:90%;
+    font-family: "Courier New", monospace;
+  }
+  #set-selector.hidden{ display:none; }
+  #set-selector button{
+    background:#111; color:#888; border:1px solid #333;
+    padding:4px 9px; font-size:11px; letter-spacing:.5px;
+    cursor:pointer; font-family:inherit;
+  }
+  #set-selector button.active{ color:#eee; border-color:#900; background:#1a0505; }
+  #set-selector button:hover{ color:#ccc; }
 </style>
 </head>
 <body>
@@ -71,6 +84,9 @@
   <div id="vignette"></div>
 </div>
 
+<div id="set-selector"></div>
+
+
 <audio id="audio-horror" preload="auto"></audio>
 
 <script>
@@ -80,7 +96,7 @@
    ============================================================ */
 const GITHUB_OWNER = "ashteroash-sudo";
 const GITHUB_REPO  = "visions";
-const GITHUB_PATH  = "vision"; // nom du dossier d'images, à la racine du dépôt
+const GITHUB_BASE_PATH = "vision"; // dossier parent — soit les images sont dedans, soit des sous-dossiers = plusieurs jeux de visions
 
 /* ============================================================
    FENÊTRE DÉTACHÉE — position/taille de la fenêtre sans barre
@@ -120,8 +136,11 @@ const redPulse = document.getElementById('red-pulse');
 const scanlines = document.getElementById('scanlines');
 const stage = document.getElementById('stage');
 const audioEl = document.getElementById('audio-horror');
+const setSelectorEl = document.getElementById('set-selector');
 
 let visionImages = [];
+let visionSets = [];       // [{name, path}]
+let currentSetIndex = 0;
 let playing = false;
 
 portraitEl.style.backgroundImage = `url(${DEFAULT_PORTRAIT_1})`;
@@ -129,27 +148,81 @@ audioEl.src = DEFAULT_AUDIO;
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i;
 
-async function loadVisionsFromGithub(){
+async function fetchGithubContents(path){
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error(`GitHub a répondu ${res.status} pour ${path}`);
+  return res.json();
+}
+
+function naturalSort(a,b){
+  return a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'});
+}
+
+async function loadVisionSets(){
   try{
-    const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${GITHUB_PATH}`;
-    const res = await fetch(url);
-    if(!res.ok) throw new Error(`GitHub a répondu ${res.status}`);
-    const data = await res.json();
-    const files = data
-      .filter(item => item.type === 'file' && IMAGE_EXT.test(item.name))
-      .sort((a,b)=> a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}));
-    visionImages = files.map(f => f.download_url);
-    if(visionImages.length === 0){
-      console.warn("0 vision trouvée dans le dossier", GITHUB_PATH);
+    const data = await fetchGithubContents(GITHUB_BASE_PATH);
+    const dirs = data.filter(item => item.type === 'dir').sort(naturalSort);
+    if(dirs.length){
+      visionSets = dirs.map(d => ({ name: d.name, path: d.path }));
+    } else {
+      // pas de sous-dossiers : les images sont directement dans vision/ (mode simple)
+      visionSets = [{ name: 'visions', path: GITHUB_BASE_PATH }];
     }
   } catch(err){
-    console.error("Impossible de charger les visions depuis GitHub:", err);
+    console.error("Impossible de charger les dossiers de visions:", err);
+    visionSets = [];
+  }
+  renderSetSelector();
+  if(visionSets.length) await selectSet(0);
+}
+
+async function loadImagesForSet(path){
+  try{
+    const data = await fetchGithubContents(path);
+    const files = data
+      .filter(item => item.type === 'file' && IMAGE_EXT.test(item.name))
+      .sort(naturalSort);
+    return files.map(f => f.download_url);
+  } catch(err){
+    console.error("Impossible de charger les images du set", path, err);
+    return [];
   }
 }
 
-loadVisionsFromGithub();
+async function selectSet(index){
+  if(index < 0 || index >= visionSets.length) return;
+  currentSetIndex = index;
+  visionImages = await loadImagesForSet(visionSets[index].path);
+  highlightSelector();
+}
+
+function renderSetSelector(){
+  setSelectorEl.innerHTML = '';
+  visionSets.forEach((set, i)=>{
+    const btn = document.createElement('button');
+    btn.textContent = `${i+1}. ${set.name}`;
+    btn.addEventListener('click', ()=> selectSet(i));
+    setSelectorEl.appendChild(btn);
+  });
+  highlightSelector();
+}
+
+function highlightSelector(){
+  Array.from(setSelectorEl.children).forEach((btn, i)=>{
+    btn.classList.toggle('active', i === currentSetIndex);
+  });
+}
+
+loadVisionSets();
 stage.addEventListener('click', playSequence);
-window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='r') playSequence(); });
+window.addEventListener('keydown', e=>{
+  const k = e.key.toLowerCase();
+  if(k === 'r'){ playSequence(); return; }
+  if(k === 'h'){ setSelectorEl.classList.toggle('hidden'); return; }
+  const n = parseInt(e.key, 10);
+  if(!isNaN(n) && n >= 1 && n <= visionSets.length){ selectSet(n-1); }
+});
 
 // découpe l'image en bandes horizontales fixes, décalées indépendamment pendant le flash
 glitchBands.forEach((band, i)=>{
