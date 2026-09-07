@@ -23,9 +23,14 @@
   }
   #vision-flash{
     position:absolute; inset:0; z-index:3;
-    background-size:cover; background-position:center;
     background-color:#050000;
     opacity:0;
+    overflow:hidden;
+  }
+  .glitch-band{
+    position:absolute; inset:0;
+    background-size:cover; background-position:center;
+    will-change:transform;
   }
   #red-pulse{
     position:absolute; inset:0; z-index:4; pointer-events:none;
@@ -54,7 +59,13 @@
 
 <div id="stage">
   <div id="portrait"></div>
-  <div id="vision-flash"></div>
+  <div id="vision-flash">
+    <div class="glitch-band"></div>
+    <div class="glitch-band"></div>
+    <div class="glitch-band"></div>
+    <div class="glitch-band"></div>
+    <div class="glitch-band"></div>
+  </div>
   <div id="red-pulse"></div>
   <div id="scanlines"></div>
   <div id="vignette"></div>
@@ -104,6 +115,7 @@ const FALLBACK_PER_IMAGE_DURATION = 500; // ms, utilisé seulement si pas de son
 
 const portraitEl = document.getElementById('portrait');
 const visionFlash = document.getElementById('vision-flash');
+const glitchBands = Array.from(visionFlash.querySelectorAll('.glitch-band'));
 const redPulse = document.getElementById('red-pulse');
 const scanlines = document.getElementById('scanlines');
 const stage = document.getElementById('stage');
@@ -138,6 +150,12 @@ async function loadVisionsFromGithub(){
 loadVisionsFromGithub();
 stage.addEventListener('click', playSequence);
 window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='r') playSequence(); });
+
+// découpe l'image en bandes horizontales fixes, décalées indépendamment pendant le flash
+glitchBands.forEach((band, i)=>{
+  const strip = 100 / glitchBands.length;
+  band.style.clipPath = `inset(${i*strip}% 0 ${100-(i+1)*strip}% 0)`;
+});
 
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
@@ -194,20 +212,24 @@ async function playSequence(){
     let frame = 0;
     while(running && frame < totalFrames){
       const idx = frame % (visionImages.length || 1);
-      if(visionImages.length){
-        visionFlash.style.backgroundImage = `url(${visionImages[idx]})`;
-      }
+      const url = visionImages.length ? visionImages[idx] : null;
 
-      // artefacts visuels marqués : jitter large + décalage chromatique + inversion aléatoire
-      const dx = (Math.random()-0.5) * 45;
-      const dy = (Math.random()-0.5) * 28;
-      const skew = (Math.random()-0.5) * 9;
-      const glitchInvert = Math.random() < 0.3 ? 'invert(1)' : '';
-      visionFlash.style.transform = `translate(${dx}px, ${dy}px) skewX(${skew}deg) scale(${1.06 + Math.random()*0.1})`;
-      visionFlash.style.filter = `${glitchInvert} contrast(${1.3 + Math.random()*0.5}) saturate(${1.4 + Math.random()*0.8}) hue-rotate(${(Math.random()-0.5)*40}deg)`;
+      // glitch : chaque bande horizontale de l'image se décale indépendamment
+      glitchBands.forEach(band=>{
+        if(url) band.style.backgroundImage = `url(${url})`;
+        const glitchy = Math.random() < 0.45; // certaines bandes déraillent plus que d'autres
+        const dx = glitchy ? (Math.random()-0.5) * 90 : (Math.random()-0.5) * 10;
+        band.style.transform = `translateX(${dx}px)`;
+      });
+
+      // léger tremblement global + teinte discrète (pas d'inversion)
+      const dx = (Math.random()-0.5) * 14;
+      const dy = (Math.random()-0.5) * 8;
+      visionFlash.style.transform = `translate(${dx}px, ${dy}px)`;
+      visionFlash.style.filter = `contrast(${1.1 + Math.random()*0.2}) saturate(${1.1 + Math.random()*0.25}) hue-rotate(${(Math.random()-0.5)*10}deg)`;
 
       // scanlines qui clignotent
-      scanlines.style.opacity = 0.15 + Math.random()*0.35;
+      scanlines.style.opacity = 0.12 + Math.random()*0.28;
 
       // le portrait en fond vibre aussi
       portraitEl.style.transform = `scale(${ZOOM_AMOUNT}) translate(${(Math.random()-0.5)*14}px, ${(Math.random()-0.5)*14}px)`;
@@ -233,6 +255,7 @@ async function playSequence(){
   visionFlash.style.opacity = 0;
   visionFlash.style.transform = 'none';
   visionFlash.style.filter = 'none';
+  glitchBands.forEach(band=> band.style.transform = 'none');
   scanlines.style.opacity = 0;
   redPulse.style.opacity = 0;
 
