@@ -160,12 +160,14 @@ async function playSequence(){
   });
   await sleep(700);
 
-  // 2) FLASH : chaque image de visions étalée sur toute la durée du son, une seule fois
+  // 2) FLASH : chaque image répétée 2 fois sur la durée du son, avec artefacts
   const audioDuration = await getAudioDuration(); // secondes, 0 si pas de son
   const totalFlashMs = audioDuration > 0
     ? audioDuration * 1000
-    : (visionImages.length ? visionImages.length * FALLBACK_PER_IMAGE_DURATION : 1500);
-  const perImageMs = visionImages.length ? totalFlashMs / visionImages.length : FALLBACK_PER_IMAGE_DURATION;
+    : (visionImages.length ? visionImages.length * FALLBACK_PER_IMAGE_DURATION * 2 : 1500);
+  const REPEATS = 2;
+  const totalFrames = visionImages.length ? visionImages.length * REPEATS : 6;
+  const perImageMs = totalFlashMs / totalFrames;
 
   if(audioEl.src){
     audioEl.currentTime = 0;
@@ -174,11 +176,32 @@ async function playSequence(){
 
   let running = true;
   (async ()=>{
-    for(let i=0; i<visionImages.length && running; i++){
-      visionFlash.style.backgroundImage = `url(${visionImages[i]})`;
+    let frame = 0;
+    while(running && frame < totalFrames){
+      const idx = frame % (visionImages.length || 1);
+      if(visionImages.length){
+        visionFlash.style.backgroundImage = `url(${visionImages[idx]})`;
+      }
+
+      // artefacts visuels légers : jitter de position + léger décalage chromatique
+      const dx = (Math.random()-0.5) * 18;
+      const dy = (Math.random()-0.5) * 10;
+      const skew = (Math.random()-0.5) * 3;
+      visionFlash.style.transform = `translate(${dx}px, ${dy}px) skewX(${skew}deg) scale(1.04)`;
+      visionFlash.style.filter = `contrast(${1.15 + Math.random()*0.25}) saturate(${1.2 + Math.random()*0.4}) hue-rotate(${(Math.random()-0.5)*12}deg)`;
+
+      // le portrait en fond vibre légèrement aussi
+      portraitEl.style.transform = `scale(${ZOOM_AMOUNT}) translate(${(Math.random()-0.5)*6}px, ${(Math.random()-0.5)*6}px)`;
+
+      // coupure nette on/off plutôt qu'un fondu mou
+      visionFlash.style.transition = 'none';
       visionFlash.style.opacity = 1;
-      redPulse.style.opacity = (i % 2 === 0) ? 0.5 : 0.15;
-      await sleep(perImageMs);
+      redPulse.style.opacity = (frame % 2 === 0) ? 0.55 : 0.2;
+      await sleep(perImageMs * 0.65);
+      visionFlash.style.opacity = 0;
+      await sleep(perImageMs * 0.35);
+
+      frame++;
     }
   })();
 
@@ -193,6 +216,8 @@ async function playSequence(){
   });
   running = false;
   visionFlash.style.opacity = 0;
+  visionFlash.style.transform = 'none';
+  visionFlash.style.filter = 'none';
   redPulse.style.opacity = 0;
 
   // 3) ZOOM OUT sur "après"
