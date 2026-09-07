@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Vision Malkavienne</title>
+<style>
+  :root{
+    --shake: 0px;
+  }
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:#000; overflow:hidden;
+    font-family: "Courier New", monospace;
+  }
+  #stage{
+    position:fixed; inset:0; background:#000;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+  }
+  #portrait{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    background-size:cover; background-position:center;
+    transform: scale(1) translate(0,0);
+    filter: saturate(1) contrast(1);
+    background-color:#1a1a1a;
+  }
+  #placeholder-text{
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    color:#555; font-size:14px; letter-spacing:2px; text-align:center;
+    pointer-events:none; padding:0 20px;
+  }
+  #vision-flash{
+    position:absolute; inset:0;
+    background-size:cover; background-position:center;
+    opacity:0; mix-blend-mode:screen;
+  }
+  #red-wash{
+    position:absolute; inset:0;
+    background:radial-gradient(ellipse at center, rgba(140,0,0,0.0) 0%, rgba(60,0,0,0.0) 100%);
+    opacity:0; pointer-events:none;
+  }
+  #blackout{
+    position:absolute; inset:0; background:#000; opacity:0; pointer-events:none;
+  }
+  #vignette{
+    position:absolute; inset:0; pointer-events:none;
+    box-shadow: inset 0 0 200px 60px rgba(0,0,0,0.85);
+  }
+  #grain{
+    position:absolute; inset:0; pointer-events:none; opacity:0.05;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+  #eyeglow{
+    position:absolute; inset:0; pointer-events:none; opacity:0;
+    background: radial-gradient(ellipse 40% 20% at 50% 46%, rgba(180,0,0,0.35), transparent 70%);
+  }
+
+  #hint{
+    position:absolute; bottom:24px; left:50%; transform:translateX(-50%);
+    color:#999; font-size:12px; letter-spacing:3px; text-transform:uppercase;
+    opacity:0.7;
+  }
+
+  /* ---- controls panel (hide before recording) ---- */
+  #panel{
+    position:fixed; top:0; right:0; width:300px; height:100%;
+    background:#0c0c0c; border-left:1px solid #300; color:#ccc;
+    font-size:12px; padding:16px; box-sizing:border-box; overflow-y:auto;
+    transition: transform .3s ease; z-index:50;
+  }
+  #panel.hidden{ transform:translateX(100%); }
+  #panel h2{ font-size:13px; color:#c33; margin:0 0 10px; letter-spacing:1px; }
+  #panel label{ display:block; margin-top:12px; color:#888; }
+  #panel input[type=file]{ width:100%; margin-top:4px; font-size:11px; color:#ccc; }
+  #panel input[type=range]{ width:100%; }
+  #panel button{
+    margin-top:16px; width:100%; padding:8px; background:#300; color:#eee;
+    border:1px solid #600; cursor:pointer; letter-spacing:1px;
+  }
+  #panel button:hover{ background:#500; }
+  #toggle-panel{
+    position:fixed; top:12px; right:12px; z-index:60;
+    background:#111; color:#999; border:1px solid #333; padding:6px 10px;
+    font-size:11px; cursor:pointer; letter-spacing:1px;
+  }
+  #vision-count{ color:#c33; }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="portrait"></div>
+  <div id="placeholder-text">Charge un portrait (panneau à droite)<br>puis clique n'importe où pour lancer la vision</div>
+  <div id="vision-flash"></div>
+  <div id="eyeglow"></div>
+  <div id="red-wash"></div>
+  <div id="grain"></div>
+  <div id="vignette"></div>
+  <div id="blackout"></div>
+  <div id="hint">clique pour déclencher · R pour rejouer</div>
+</div>
+
+<button id="toggle-panel">Cacher panneau</button>
+<div id="panel">
+  <h2>PORTRAITS</h2>
+  <label>Portrait normal <input type="file" id="f-portrait1" accept="image/*"></label>
+  <label>Portrait après (larmes de sang) <input type="file" id="f-portrait2" accept="image/*"></label>
+
+  <h2 style="margin-top:20px;">VISIONS (flash)</h2>
+  <label>Images de visions (choisis-en plusieurs) <input type="file" id="f-visions" accept="image/*" multiple></label>
+  <div id="vision-count">0 image(s) chargée(s)</div>
+
+  <h2 style="margin-top:20px;">SON</h2>
+  <label>Bruit horrifique <input type="file" id="f-audio" accept="audio/*"></label>
+
+  <h2 style="margin-top:20px;">TIMING</h2>
+  <label>Intensité du zoom (<span id="zoom-val">2.6</span>x)
+    <input type="range" id="r-zoom" min="1.5" max="4" step="0.1" value="2.6">
+  </label>
+  <label>Durée du flash (<span id="flash-val">900</span>ms)
+    <input type="range" id="r-flash" min="400" max="2000" step="50" value="900">
+  </label>
+
+  <button id="btn-play">▶ Lancer la vision</button>
+  <button id="btn-reset">↺ Réinitialiser</button>
+</div>
+
+<audio id="audio-horror" preload="auto"></audio>
+
+<script>
+const portraitEl = document.getElementById('portrait');
+const placeholderText = document.getElementById('placeholder-text');
+const visionFlash = document.getElementById('vision-flash');
+const redWash = document.getElementById('red-wash');
+const blackout = document.getElementById('blackout');
+const eyeglow = document.getElementById('eyeglow');
+const stage = document.getElementById('stage');
+const audioEl = document.getElementById('audio-horror');
+const panel = document.getElementById('panel');
+const toggleBtn = document.getElementById('toggle-panel');
+
+let portrait1Url = null;
+let portrait2Url = null;
+let visionUrls = [];
+let zoomAmount = 2.6;
+let flashDuration = 900;
+let playing = false;
+
+function loadFile(input, cb){
+  input.addEventListener('change', e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    cb(URL.createObjectURL(file));
+  });
+}
+
+loadFile(document.getElementById('f-portrait1'), url=>{
+  portrait1Url = url;
+  portraitEl.style.backgroundImage = `url(${url})`;
+  placeholderText.style.display = 'none';
+});
+loadFile(document.getElementById('f-portrait2'), url=> portrait2Url = url);
+
+document.getElementById('f-visions').addEventListener('change', e=>{
+  visionUrls = Array.from(e.target.files).map(f=>URL.createObjectURL(f));
+  document.getElementById('vision-count').textContent = visionUrls.length + ' image(s) chargée(s)';
+});
+
+document.getElementById('f-audio').addEventListener('change', e=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  audioEl.src = URL.createObjectURL(file);
+});
+
+document.getElementById('r-zoom').addEventListener('input', e=>{
+  zoomAmount = parseFloat(e.target.value);
+  document.getElementById('zoom-val').textContent = zoomAmount.toFixed(1);
+});
+document.getElementById('r-flash').addEventListener('input', e=>{
+  flashDuration = parseInt(e.target.value);
+  document.getElementById('flash-val').textContent = flashDuration;
+});
+
+toggleBtn.addEventListener('click', ()=>{
+  panel.classList.toggle('hidden');
+  toggleBtn.textContent = panel.classList.contains('hidden') ? 'Montrer panneau' : 'Cacher panneau';
+});
+
+document.getElementById('btn-play').addEventListener('click', playSequence);
+document.getElementById('btn-reset').addEventListener('click', resetStage);
+stage.addEventListener('click', playSequence);
+window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='r') playSequence(); });
+
+function resetStage(){
+  playing = false;
+  portraitEl.style.transition = 'none';
+  portraitEl.style.transform = 'scale(1) translate(0,0)';
+  portraitEl.style.filter = 'saturate(1) contrast(1)';
+  if(portrait1Url) portraitEl.style.backgroundImage = `url(${portrait1Url})`;
+  visionFlash.style.opacity = 0;
+  redWash.style.opacity = 0;
+  blackout.style.opacity = 0;
+  eyeglow.style.opacity = 0;
+}
+
+function shake(intensity, duration){
+  const start = performance.now();
+  function tick(now){
+    const t = now - start;
+    if(t > duration || !playing) return;
+    const dx = (Math.random()-0.5) * intensity;
+    const dy = (Math.random()-0.5) * intensity;
+    portraitEl.style.transform = `scale(${currentScale}) translate(${dx}px,${dy}px)`;
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+let currentScale = 1;
+
+async function playSequence(){
+  if(playing) return;
+  if(!portrait1Url){ alert("Charge d'abord un portrait dans le panneau à droite."); return; }
+  playing = true;
+  resetStage();
+  await sleep(30);
+
+  // 1) ZOOM IN AGRESSIF
+  currentScale = 1;
+  portraitEl.style.transition = 'transform 700ms cubic-bezier(.7,0,.9,.4), filter 700ms ease-in';
+  portraitEl.style.filter = 'saturate(1.6) contrast(1.3)';
+  requestAnimationFrame(()=>{
+    currentScale = zoomAmount;
+    portraitEl.style.transform = `scale(${zoomAmount})`;
+  });
+  shake(3, 700);
+
+  // audio starts just before the peak, anticipation
+  await sleep(550);
+  if(audioEl.src){
+    audioEl.currentTime = 0;
+    audioEl.play().catch(()=>{});
+  }
+  await sleep(150);
+
+  // 2) FLASH DE VISIONS
+  portraitEl.style.transition = 'none';
+  redWash.style.transition = 'opacity 60ms linear';
+  redWash.style.background = 'radial-gradient(ellipse at center, rgba(180,0,0,0.55) 0%, rgba(60,0,0,0.25) 60%, transparent 100%)';
+  eyeglow.style.transition = 'opacity 200ms ease-in';
+  eyeglow.style.opacity = 1;
+  shake(14, flashDuration);
+
+  const flashStart = performance.now();
+  let i = 0;
+  while(performance.now() - flashStart < flashDuration && playing){
+    if(visionUrls.length){
+      visionFlash.style.backgroundImage = `url(${visionUrls[i % visionUrls.length]})`;
+      i++;
+    }
+    visionFlash.style.transition = 'none';
+    visionFlash.style.opacity = 1;
+    redWash.style.opacity = Math.random() > 0.5 ? 1 : 0.4;
+    await sleep(70 + Math.random()*70);
+    visionFlash.style.opacity = 0;
+    redWash.style.opacity = 0.15;
+    await sleep(40 + Math.random()*50);
+  }
+  redWash.style.opacity = 0;
+
+  // 3) CUT TO BLACK
+  blackout.style.transition = 'opacity 70ms linear';
+  blackout.style.opacity = 1;
+  await sleep(120);
+
+  // swap portrait while hidden
+  if(portrait2Url){
+    portraitEl.style.backgroundImage = `url(${portrait2Url})`;
+  }
+  portraitEl.style.transition = 'none';
+  portraitEl.style.filter = 'saturate(1) contrast(1.05)';
+  currentScale = zoomAmount * 1.05;
+  portraitEl.style.transform = `scale(${currentScale})`;
+  await sleep(80);
+
+  // 4) ZOOM OUT
+  blackout.style.transition = 'opacity 300ms ease-out';
+  blackout.style.opacity = 0;
+  portraitEl.style.transition = 'transform 1000ms cubic-bezier(.16,1,.3,1)';
+  currentScale = 1;
+  portraitEl.style.transform = 'scale(1)';
+  eyeglow.style.transition = 'opacity 1000ms ease-out';
+  eyeglow.style.opacity = 0.25;
+
+  await sleep(1000);
+  playing = false;
+}
+
+function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+</script>
+</body>
+</html>
