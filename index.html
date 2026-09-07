@@ -37,18 +37,6 @@
     position:absolute; inset:0; z-index:5; pointer-events:none;
     box-shadow: inset 0 0 180px 50px rgba(0,0,0,0.8);
   }
-  #hint{
-    position:absolute; bottom:24px; left:50%; transform:translateX(-50%); z-index:9;
-    color:#999; font-size:12px; letter-spacing:3px; text-transform:uppercase;
-    opacity:0.7;
-  }
-  #status{
-    position:fixed; top:12px; left:12px; z-index:60;
-    background:#111; color:#888; border:1px solid #333; padding:6px 10px;
-    font-size:11px; letter-spacing:1px; cursor:pointer;
-  }
-  #status.ok{ color:#8c8; border-color:#363; }
-  #status.err{ color:#c66; border-color:#633; }
 </style>
 </head>
 <body>
@@ -58,30 +46,18 @@
   <div id="vision-flash"></div>
   <div id="red-pulse"></div>
   <div id="vignette"></div>
-  <div id="hint">clique pour déclencher · R pour rejouer</div>
 </div>
-
-<div id="status">chargement des visions…</div>
 
 <audio id="audio-horror" preload="auto"></audio>
 
 <script>
 /* ============================================================
-   CONFIG — rien à éditer si la page tourne sur GitHub Pages
-   (owner + dépôt sont déduits automatiquement de l'URL)
+   CONFIG — à éditer une seule fois
+   (le dépôt GitHub où se trouve le dossier d'images "vision/")
    ============================================================ */
-const GITHUB_PATH = "vision"; // nom du dossier d'images, à la racine du dépôt
-
-function detectRepoFromLocation(){
-  const host = location.hostname; // ex: "tonuser.github.io"
-  if(!host.endsWith('.github.io')) return null;
-  const owner = host.split('.')[0];
-  const parts = location.pathname.split('/').filter(Boolean);
-  // page de projet (https://owner.github.io/repo/...) -> le repo est le 1er segment
-  // page utilisateur (https://owner.github.io/) -> le repo s'appelle "owner.github.io"
-  const repo = parts.length > 0 ? parts[0] : host;
-  return { owner, repo };
-}
+const GITHUB_OWNER = "TON_USERNAME";
+const GITHUB_REPO  = "TON_DEPOT";
+const GITHUB_PATH  = "vision"; // nom du dossier d'images, à la racine du dépôt
 
 /* ============================================================
    ASSETS FIXES (embarqués — avant / après / son)
@@ -98,7 +74,6 @@ const visionFlash = document.getElementById('vision-flash');
 const redPulse = document.getElementById('red-pulse');
 const stage = document.getElementById('stage');
 const audioEl = document.getElementById('audio-horror');
-const statusEl = document.getElementById('status');
 
 let visionImages = [];
 let playing = false;
@@ -109,16 +84,8 @@ audioEl.src = DEFAULT_AUDIO;
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i;
 
 async function loadVisionsFromGithub(){
-  statusEl.textContent = "chargement des visions…";
-  statusEl.className = "";
-  const repoInfo = detectRepoFromLocation();
-  if(!repoInfo){
-    statusEl.textContent = "Ouvre cette page via ton URL github.io pour charger les visions";
-    statusEl.className = "err";
-    return;
-  }
   try{
-    const url = `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/contents/${GITHUB_PATH}`;
+    const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${GITHUB_PATH}`;
     const res = await fetch(url);
     if(!res.ok) throw new Error(`GitHub a répondu ${res.status}`);
     const data = await res.json();
@@ -127,22 +94,14 @@ async function loadVisionsFromGithub(){
       .sort((a,b)=> a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}));
     visionImages = files.map(f => f.download_url);
     if(visionImages.length === 0){
-      statusEl.textContent = "0 vision trouvée dans le dossier";
-      statusEl.className = "err";
-    } else {
-      statusEl.textContent = visionImages.length + " vision(s) chargée(s) · clic pour actualiser";
-      statusEl.className = "ok";
+      console.warn("0 vision trouvée dans le dossier", GITHUB_PATH);
     }
   } catch(err){
-    statusEl.textContent = "Erreur GitHub — vérifie la config (voir console)";
-    statusEl.className = "err";
     console.error("Impossible de charger les visions depuis GitHub:", err);
   }
 }
 
-statusEl.addEventListener('click', loadVisionsFromGithub);
 loadVisionsFromGithub();
-
 stage.addEventListener('click', playSequence);
 window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='r') playSequence(); });
 
