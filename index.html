@@ -175,6 +175,8 @@ async function playSequence(){
   }
 
   let running = true;
+  visionFlash.style.transition = 'none';
+  visionFlash.style.opacity = 1;
   (async ()=>{
     let frame = 0;
     while(running && frame < totalFrames){
@@ -193,13 +195,8 @@ async function playSequence(){
       // le portrait en fond vibre légèrement aussi
       portraitEl.style.transform = `scale(${ZOOM_AMOUNT}) translate(${(Math.random()-0.5)*6}px, ${(Math.random()-0.5)*6}px)`;
 
-      // coupure nette on/off plutôt qu'un fondu mou
-      visionFlash.style.transition = 'none';
-      visionFlash.style.opacity = 1;
       redPulse.style.opacity = (frame % 2 === 0) ? 0.55 : 0.2;
-      await sleep(perImageMs * 0.65);
-      visionFlash.style.opacity = 0;
-      await sleep(perImageMs * 0.35);
+      await sleep(perImageMs);
 
       frame++;
     }
