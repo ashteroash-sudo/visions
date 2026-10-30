@@ -2,6 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Vision Malkavienne</title>
 <style>
   html,body{
@@ -66,6 +67,30 @@
   }
   #set-selector button.active{ color:#eee; border-color:#900; background:#1a0505; }
   #set-selector button:hover{ color:#ccc; }
+
+  /* ---- fin de vision : invite + écran « journal » (à screenshoter) ---- */
+  #journal-prompt{
+    position:fixed; left:50%; bottom:calc(28px + env(safe-area-inset-bottom)); transform:translateX(-50%);
+    z-index:20; padding:10px 18px; border:1px solid #7a1a1a; border-radius:999px;
+    background:rgba(8,0,0,.72); color:#e6d9c8;
+    font:italic 15px/1.2 Georgia,"Times New Roman",serif; white-space:nowrap;
+    cursor:pointer; opacity:0; pointer-events:none; transition:opacity .8s ease;
+  }
+  #journal-prompt.show{ opacity:1; pointer-events:auto; }
+  #journal-screen{
+    position:fixed; inset:0; z-index:30; display:none;
+    background:#000 center/cover no-repeat;
+  }
+  #journal-screen.show{ display:block; }
+  #journal-text{
+    position:absolute; left:0; right:0; bottom:0; box-sizing:border-box;
+    padding:64px 22px calc(26px + env(safe-area-inset-bottom));
+    background:linear-gradient(to bottom, rgba(0,0,0,0), rgba(0,0,0,.82) 36%, rgba(0,0,0,.93));
+    color:#eadfce; font:italic clamp(15px,4.2vw,20px)/1.5 Georgia,"Times New Roman",serif;
+    white-space:pre-wrap; max-height:62%; overflow-y:auto;
+  }
+  #journal-text:empty{ display:none; }
+  body.journal-open #set-selector{ display:none; }
 </style>
 <script src="hors-ligne.js" data-depot="visions" data-raw></script>
 </head>
@@ -86,6 +111,9 @@
 </div>
 
 <div id="set-selector"></div>
+
+<div id="journal-prompt">Noter dans mon journal ?</div>
+<div id="journal-screen"><div id="journal-text"></div></div>
 
 
 <audio id="audio-horror" preload="auto"></audio>
@@ -109,7 +137,10 @@ const POPUP_HEIGHT = 760;
 const POPUP_LEFT   = 1200;
 const POPUP_TOP    = 150;
 
-if (!location.search.includes('popup=1')) {
+const urlParams = new URLSearchParams(location.search);
+const VISION_FIXE = urlParams.get('set'); // lien direct vers UNE vision (ex. sur téléphone)
+
+if (!urlParams.has('popup') && !VISION_FIXE) {
   const sep = location.href.includes('?') ? '&' : '?';
   const features = `width=${POPUP_WIDTH},height=${POPUP_HEIGHT},left=${POPUP_LEFT},top=${POPUP_TOP},toolbar=no,location=no,menubar=no,status=no,scrollbars=no,resizable=yes`;
   window.open(location.href + sep + 'popup=1', 'visionMalkavienne', features);
@@ -142,6 +173,8 @@ const setSelectorEl = document.getElementById('set-selector');
 let visionImages = [];
 let visionSets = [];       // [{name, path}]
 let currentSetIndex = 0;
+let journalImage = null;   // journal.png|jpg|jpeg du dossier (écran de fin)
+let journalText = '';      // texte du .txt du dossier
 let playing = false;
 
 portraitEl.style.backgroundImage = `url(${DEFAULT_PORTRAIT_1})`;
@@ -175,26 +208,46 @@ async function loadVisionSets(){
     visionSets = [];
   }
   renderSetSelector();
-  if(visionSets.length) await selectSet(0);
+  let start = 0;
+  if(VISION_FIXE){
+    const cible = VISION_FIXE.normalize('NFC').toLowerCase();
+    const i = visionSets.findIndex(s => s.name.normalize('NFC').toLowerCase() === cible);
+    if(i >= 0){ start = i; setSelectorEl.classList.add('hidden'); }
+    else console.warn("Vision introuvable :", VISION_FIXE);
+  }
+  if(visionSets.length) await selectSet(start);
 }
 
-async function loadImagesForSet(path){
+const JOURNAL_IMAGE = /^journal\.(png|jpe?g)$/i;
+
+async function loadSetContent(path){
+  const out = { images: [], journalImage: null, journalText: '' };
   try{
     const data = await fetchGithubContents(path);
-    const files = data
-      .filter(item => item.type === 'file' && IMAGE_EXT.test(item.name))
-      .sort(naturalSort);
-    return files.map(f => f.download_url);
+    const files = data.filter(item => item.type === 'file').sort(naturalSort);
+    const imgs = files.filter(f => IMAGE_EXT.test(f.name));
+    out.images = imgs.map(f => f.download_url);               // journal.* se joue comme les autres
+    const j = imgs.find(f => JOURNAL_IMAGE.test(f.name));
+    if(j) out.journalImage = j.download_url;
+    const txts = files.filter(f => /\.txt$/i.test(f.name));
+    const t = txts.find(f => /^journal\.txt$/i.test(f.name)) || txts[0];
+    if(t){
+      const r = await fetch(t.download_url);
+      if(r.ok) out.journalText = (await r.text()).trim();
+    }
   } catch(err){
-    console.error("Impossible de charger les images du set", path, err);
-    return [];
+    console.error("Impossible de charger le contenu du set", path, err);
   }
+  return out;
 }
 
 async function selectSet(index){
   if(index < 0 || index >= visionSets.length) return;
   currentSetIndex = index;
-  visionImages = await loadImagesForSet(visionSets[index].path);
+  const c = await loadSetContent(visionSets[index].path);
+  visionImages = c.images;
+  journalImage = c.journalImage;
+  journalText = c.journalText;
   highlightSelector();
 }
 
@@ -215,11 +268,23 @@ function highlightSelector(){
   });
 }
 
-loadVisionSets();
-stage.addEventListener('click', playSequence);
+const setsReady = loadVisionSets();
+
+// Sur téléphone, le son doit être « débloqué » par le tout premier toucher
+let audioDebloque = false;
+function debloquerAudio(){
+  if(audioDebloque) return;
+  audioDebloque = true;
+  audioEl.muted = true;
+  audioEl.play()
+    .then(()=>{ audioEl.pause(); audioEl.currentTime = 0; audioEl.muted = false; })
+    .catch(()=>{ audioEl.muted = false; });
+}
+stage.addEventListener('click', ()=>{ debloquerAudio(); playSequence(); });
 window.addEventListener('keydown', e=>{
   const k = e.key.toLowerCase();
   if(k === 'r'){ playSequence(); return; }
+  if(VISION_FIXE) return;   // lien direct : pas de changement de vision au clavier
   if(k === 'h'){ setSelectorEl.classList.toggle('hidden'); return; }
   const n = parseInt(e.key, 10);
   if(!isNaN(n) && n >= 1 && n <= visionSets.length){ selectSet(n-1); }
@@ -232,6 +297,24 @@ glitchBands.forEach((band, i)=>{
 });
 
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+/* ---- écran « journal » : image journal.* + texte, prêt à screenshoter ---- */
+const journalPrompt = document.getElementById('journal-prompt');
+const journalScreen = document.getElementById('journal-screen');
+const journalTextEl = document.getElementById('journal-text');
+
+function masquerJournal(){
+  journalPrompt.classList.remove('show');
+  journalScreen.classList.remove('show');
+  document.body.classList.remove('journal-open');
+}
+journalPrompt.addEventListener('click', ()=>{
+  journalScreen.style.backgroundImage = `url("${journalImage || DEFAULT_PORTRAIT_2}")`;
+  journalTextEl.textContent = journalText;
+  journalPrompt.classList.remove('show');
+  journalScreen.classList.add('show');
+  document.body.classList.add('journal-open');
+});
 
 function getAudioDuration(){
   return new Promise(resolve=>{
@@ -251,6 +334,8 @@ function getAudioDuration(){
 async function playSequence(){
   if(playing) return;
   playing = true;
+  masquerJournal();
+  await setsReady;
   portraitEl.style.transition = 'none';
   portraitEl.style.transform = 'scale(1)';
   portraitEl.style.backgroundImage = `url(${DEFAULT_PORTRAIT_1})`;
@@ -340,6 +425,7 @@ async function playSequence(){
 
   await sleep(900);
   playing = false;
+  if(journalImage || journalText) journalPrompt.classList.add('show');
 }
 
 } // fin runVisionPage
